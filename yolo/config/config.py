@@ -59,12 +59,14 @@ class DataConfig:
     image_size: List[int]
     data_augment: Dict[str, int]
     source: Optional[Union[str, int]]
+    dynamic_shape: Optional[bool]
 
 
 @dataclass
 class OptimizerArgs:
     lr: float
     weight_decay: float
+    momentum: float
 
 
 @dataclass
@@ -96,14 +98,15 @@ class SchedulerConfig:
 
 @dataclass
 class EMAConfig:
-    enabled: bool
+    enable: bool
     decay: float
 
 
 @dataclass
 class NMSConfig:
-    min_confidence: int
-    min_iou: int
+    min_confidence: float
+    min_iou: float
+    max_bbox: int
 
 
 @dataclass
@@ -163,6 +166,7 @@ class YOLOLayer(nn.Module):
     tags: str
     layer_type: str
     usable: bool
+    external: Optional[dict]
 
 
 IDX_TO_ID = [

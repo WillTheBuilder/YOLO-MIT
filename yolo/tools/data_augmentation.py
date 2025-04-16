@@ -1,3 +1,5 @@
+from typing import List
+
 import numpy as np
 import torch
 from PIL import Image
@@ -7,11 +9,11 @@ from torchvision.transforms import functional as TF
 class AugmentationComposer:
     """Composes several transforms together."""
 
-    def __init__(self, transforms, image_size: int = [640, 640]):
+    def __init__(self, transforms, image_size: int = [640, 640], base_size: int = 640):
         self.transforms = transforms
         # TODO: handle List of image_size [640, 640]
-        self.image_size = image_size
-        self.pad_resize = PadAndResize(self.image_size)
+        self.pad_resize = PadAndResize(image_size)
+        self.base_size = base_size
 
         for transform in self.transforms:
             if hasattr(transform, "set_parent"):
@@ -57,12 +59,15 @@ class PadAndResize:
         self.target_width, self.target_height = image_size
         self.background_color = background_color
 
+    def set_size(self, image_size: List[int]):
+        self.target_width, self.target_height = image_size
+
     def __call__(self, image: Image, boxes):
         img_width, img_height = image.size
         scale = min(self.target_width / img_width, self.target_height / img_height)
         new_width, new_height = int(img_width * scale), int(img_height * scale)
 
-        resized_image = image.resize((new_width, new_height), Image.LANCZOS)
+        resized_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
         pad_left = (self.target_width - new_width) // 2
         pad_top = (self.target_height - new_height) // 2
@@ -118,7 +123,7 @@ class Mosaic:
 
         assert self.parent is not None, "Parent is not set. Mosaic cannot retrieve image size."
 
-        img_sz = self.parent.image_size[0]  # Assuming `image_size` is defined in parent
+        img_sz = self.parent.base_size  # Assuming `image_size` is defined in parent
         more_data = self.parent.get_more_data(3)  # get 3 more images randomly
 
         data = [(image, boxes)] + more_data
@@ -174,10 +179,10 @@ class MixUp:
         image1, image2 = TF.to_tensor(image), TF.to_tensor(image2)
         mixed_image = lam * image1 + (1 - lam) * image2
 
-        # Mix bounding boxes
-        mixed_boxes = torch.cat([lam * boxes, (1 - lam) * boxes2])
+        # Merge bounding boxes
+        merged_boxes = torch.cat((boxes, boxes2))
 
-        return TF.to_pil_image(mixed_image), mixed_boxes
+        return TF.to_pil_image(mixed_image), merged_boxes
 
 
 class RandomCrop:

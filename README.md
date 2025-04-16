@@ -1,13 +1,4 @@
-# YOLO: Official Implementation of YOLOv9, YOLOv7
-
-> [!CAUTION]
-> We wanted to inform you that the training code for this project is still in progress, and there are two known issues:
->
-> - CPU memory leak during training
-> - Slower convergence speed
->
-> We strongly recommend refraining from training the model until version 1.0 is released.
-> However, inference and validation with pre-trained weights on COCO are available and can be used safely.
+# YOLO: Official Implementation of YOLOv9, YOLOv7, YOLO-RD
 
 [![Documentation Status](https://readthedocs.org/projects/yolo-docs/badge/?version=latest)](https://yolo-docs.readthedocs.io/en/latest/?badge=latest)
 ![GitHub License](https://img.shields.io/github/license/WongKinYiu/YOLO)
@@ -26,7 +17,7 @@
 >
 > Use of this code is at your own risk and discretion. It is advisable to consult with the project owner before deploying or integrating into any critical systems. -->
 
-Welcome to the official implementation of YOLOv7 and YOLOv9. This repository will contains the complete codebase, pre-trained models, and detailed instructions for training and deploying YOLOv9.
+Welcome to the official implementation of YOLOv7[^1] and YOLOv9[^2], YOLO-RD[^3]. This repository will contains the complete codebase, pre-trained models, and detailed instructions for training and deploying YOLOv9.
 
 ## TL;DR
 
@@ -42,6 +33,7 @@ yolo task.data.source=0 # source could be a single file, video, image folder, we
 
 - [**YOLOv9**: Learning What You Want to Learn Using Programmable Gradient Information](https://arxiv.org/abs/2402.13616)
 - [**YOLOv7**: Trainable Bag-of-Freebies Sets New State-of-the-Art for Real-Time Object Detectors](https://arxiv.org/abs/2207.02696)
+- [**YOLO-RD**: Introducing Relevant and Compact Explicit Knowledge to YOLO by Retriever-Dictionary](https://arxiv.org/abs/2410.15346)
 
 ## Installation
 
@@ -113,54 +105,37 @@ python yolo/lazy.py task=validation dataset=toy
 
 Contributions to the YOLO project are welcome! See [CONTRIBUTING](docs/CONTRIBUTING.md) for guidelines on how to contribute.
 
-### TODO Diagrams
-
-```mermaid
-flowchart TB
-    subgraph Features
-      Taskv7-->Segmentation["#35 Segmentation"]
-      Taskv7-->Classification["#34 Classification"]
-      Taskv9-->Segmentation
-      Taskv9-->Classification
-      Trainv7
-    end
-    subgraph Model
-      MODELv7-->v7-X
-      MODELv7-->v7-E6
-      MODELv7-->v7-E6E
-      MODELv9-->v9-T
-      MODELv9-->v9-S
-      MODELv9-->v9-E
-    end
-    subgraph Bugs
-      Fix-->Fix1["#12 mAP > 1"]
-      Fix-->Fix2["v9 Gradient Bump"]
-      Reply-->Reply1["#39"]
-      Reply-->Reply2["#36"]
-    end
-```
-
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=WongKinYiu/YOLO&type=Date)](https://star-history.com/#WongKinYiu/YOLO&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=MultimediaTechLab/YOLO&type=Date)](https://star-history.com/#MultimediaTechLab/YOLO&Date)
 
 ## Citations
 
 ```
-@misc{wang2022yolov7,
-      title={YOLOv7: Trainable bag-of-freebies sets new state-of-the-art for real-time object detectors},
-      author={Chien-Yao Wang and Alexey Bochkovskiy and Hong-Yuan Mark Liao},
-      year={2022},
-      eprint={2207.02696},
-      archivePrefix={arXiv},
-      primaryClass={id='cs.CV' full_name='Computer Vision and Pattern Recognition' is_active=True alt_name=None in_archive='cs' is_general=False description='Covers image processing, computer vision, pattern recognition, and scene understanding. Roughly includes material in ACM Subject Classes I.2.10, I.4, and I.5.'}
+@inproceedings{wang2022yolov7,
+      title={{YOLOv7}: Trainable Bag-of-Freebies Sets New State-of-the-Art for Real-Time Object Detectors},
+      author={Wang, Chien-Yao and Bochkovskiy, Alexey and Liao, Hong-Yuan Mark},
+      year={2023},
+      booktitle={Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+
 }
-@misc{wang2024yolov9,
-      title={YOLOv9: Learning What You Want to Learn Using Programmable Gradient Information},
-      author={Chien-Yao Wang and I-Hau Yeh and Hong-Yuan Mark Liao},
+@inproceedings{wang2024yolov9,
+      title={{YOLOv9}: Learning What You Want to Learn Using Programmable Gradient Information},
+      author={Wang, Chien-Yao and Yeh, I-Hau and Liao, Hong-Yuan Mark},
       year={2024},
-      eprint={2402.13616},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV}
+      booktitle={Proceedings of the European Conference on Computer Vision (ECCV)},
 }
+@inproceedings{tsui2024yolord,
+      author={Tsui, Hao-Tang and Wang, Chien-Yao and Liao, Hong-Yuan Mark},
+      title={{YOLO-RD}: Introducing Relevant and Compact Explicit Knowledge to YOLO by Retriever-Dictionary},
+      booktitle={Proceedings of the International Conference on Learning Representations (ICLR)},
+      year={2025},
+}
+
 ```
+
+[^1]: [**YOLOv7**: Trainable Bag-of-Freebies Sets New State-of-the-Art for Real-Time Object Detectors](https://arxiv.org/abs/2207.02696)
+
+[^2]: [**YOLOv9**: Learning What You Want to Learn Using Programmable Gradient Information](https://arxiv.org/abs/2402.13616)
+
+[^3]: [**YOLO-RD**: Introducing Relevant and Compact Explicit Knowledge to YOLO by Retriever-Dictionary](https://arxiv.org/abs/2410.15346)

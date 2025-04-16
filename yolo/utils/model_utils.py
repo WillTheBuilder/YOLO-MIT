@@ -1,42 +1,68 @@
 import os
+from copy import deepcopy
+from math import exp
 from pathlib import Path
 from typing import List, Optional, Type, Union
 
 import torch
 import torch.distributed as dist
-from loguru import logger
+from lightning import LightningModule, Trainer
+from lightning.pytorch.callbacks import Callback
 from omegaconf import ListConfig
-from torch import Tensor
+from torch import Tensor, no_grad
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR, SequentialLR, _LRScheduler
 
 from yolo.config.config import IDX_TO_ID, NMSConfig, OptimizerConfig, SchedulerConfig
 from yolo.model.yolo import YOLO
-from yolo.utils.bounding_box_utils import bbox_nms, transform_bbox
+from yolo.utils.bounding_box_utils import Anc2Box, Vec2Box, bbox_nms, transform_bbox
+from yolo.utils.logger import logger
 
 
-class ExponentialMovingAverage:
-    def __init__(self, model: torch.nn.Module, decay: float):
-        self.model = model
+def lerp(start: float, end: float, step: Union[int, float], total: int = 1):
+    """
+    Linearly interpolates between start and end values.
+
+    start * (1 - step) + end * step
+
+    Parameters:
+        start (float): The starting value.
+        end (float): The ending value.
+        step (int): The current step in the interpolation process.
+        total (int): The total number of steps.
+
+    Returns:
+        float: The interpolated value.
+    """
+    return start + (end - start) * step / total
+
+
+class EMA(Callback):
+    def __init__(self, decay: float = 0.9999, tau: float = 2000):
+        super().__init__()
+        logger.info(":chart_with_upwards_trend: Enable Model EMA")
         self.decay = decay
-        self.shadow = {name: param.clone().detach() for name, param in model.named_parameters()}
+        self.tau = tau
+        self.step = 0
+        self.ema_state_dict = None
 
-    def update(self):
-        """Update the shadow parameters using the current model parameters."""
-        for name, param in self.model.named_parameters():
-            assert name in self.shadow, "All model parameters should have a corresponding shadow parameter."
-            new_average = (1.0 - self.decay) * param.data + self.decay * self.shadow[name]
-            self.shadow[name] = new_average.clone()
+    def setup(self, trainer, pl_module, stage):
+        pl_module.ema = deepcopy(pl_module.model)
+        self.tau /= trainer.world_size
+        for param in pl_module.ema.parameters():
+            param.requires_grad = False
 
-    def apply_shadow(self):
-        """Apply the shadow parameters to the model."""
-        for name, param in self.model.named_parameters():
-            param.data.copy_(self.shadow[name])
+    def on_validation_start(self, trainer: "Trainer", pl_module: "LightningModule"):
+        if self.ema_state_dict is None:
+            self.ema_state_dict = deepcopy(pl_module.model.state_dict())
+        pl_module.ema.load_state_dict(self.ema_state_dict)
 
-    def restore(self):
-        """Restore the original parameters from the shadow."""
-        for name, param in self.model.named_parameters():
-            self.shadow[name].copy_(param.data)
+    @no_grad()
+    def on_train_batch_end(self, trainer: "Trainer", pl_module: "LightningModule", *args, **kwargs) -> None:
+        self.step += 1
+        decay_factor = self.decay * (1 - exp(-self.step / self.tau))
+        for key, param in pl_module.model.state_dict().items():
+            self.ema_state_dict[key] = lerp(param.detach(), self.ema_state_dict[key], decay_factor)
 
 
 def create_optimizer(model: YOLO, optim_cfg: OptimizerConfig) -> Optimizer:
@@ -52,25 +78,37 @@ def create_optimizer(model: YOLO, optim_cfg: OptimizerConfig) -> Optimizer:
     conv_params = [p for name, p in model.named_parameters() if "weight" in name and "bn" not in name]
 
     model_parameters = [
-        {"params": bias_params, "weight_decay": 0},
-        {"params": conv_params},
-        {"params": norm_params, "weight_decay": 0},
+        {"params": bias_params, "momentum": 0.937, "weight_decay": 0},
+        {"params": conv_params, "momentum": 0.937},
+        {"params": norm_params, "momentum": 0.937, "weight_decay": 0},
     ]
 
-    def next_epoch(self, batch_num):
+    def next_epoch(self, batch_num, epoch_idx):
         self.min_lr = self.max_lr
         self.max_lr = [param["lr"] for param in self.param_groups]
+        # TODO: load momentum from config instead a fix number
+        #       0.937: Start Momentum
+        #       0.8  : Normal Momemtum
+        #       3    : The warm up epoch num
+        self.min_mom = lerp(0.8, 0.937, min(epoch_idx, 3), 3)
+        self.max_mom = lerp(0.8, 0.937, min(epoch_idx + 1, 3), 3)
         self.batch_num = batch_num
         self.batch_idx = 0
 
     def next_batch(self):
         self.batch_idx += 1
+        lr_dict = dict()
         for lr_idx, param_group in enumerate(self.param_groups):
             min_lr, max_lr = self.min_lr[lr_idx], self.max_lr[lr_idx]
-            param_group["lr"] = min_lr + (self.batch_idx) * (max_lr - min_lr) / self.batch_num
+            param_group["lr"] = lerp(min_lr, max_lr, self.batch_idx, self.batch_num)
+            param_group["momentum"] = lerp(self.min_mom, self.max_mom, self.batch_idx, self.batch_num)
+            lr_dict[f"LR/{lr_idx}"] = param_group["lr"]
+            lr_dict[f"momentum/{lr_idx}"] = param_group["momentum"]
+        return lr_dict
 
     optimizer_class.next_batch = next_batch
     optimizer_class.next_epoch = next_epoch
+
     optimizer = optimizer_class(model_parameters, **optim_cfg.args)
     optimizer.max_lr = [0.1, 0, 0]
     return optimizer
@@ -89,7 +127,7 @@ def create_scheduler(optimizer: Optimizer, schedule_cfg: SchedulerConfig) -> _LR
         lambda1 = lambda epoch: (epoch + 1) / wepoch if epoch < wepoch else 1
         lambda2 = lambda epoch: 10 - 9 * ((epoch + 1) / wepoch) if epoch < wepoch else 1
         warmup_schedule = LambdaLR(optimizer, lr_lambda=[lambda2, lambda1, lambda1])
-        schedule = SequentialLR(optimizer, schedulers=[warmup_schedule, schedule], milestones=[2])
+        schedule = SequentialLR(optimizer, schedulers=[warmup_schedule, schedule], milestones=[wepoch - 1])
     return schedule
 
 
@@ -120,17 +158,21 @@ def get_device(device_spec: Union[str, int, List[int]]) -> torch.device:
     return device, ddp_flag
 
 
-class PostProccess:
+class PostProcess:
     """
     TODO: function document
     scale back the prediction and do nms for pred_bbox
     """
 
-    def __init__(self, converter, nms_cfg: NMSConfig) -> None:
+    def __init__(self, converter: Union[Vec2Box, Anc2Box], nms_cfg: NMSConfig) -> None:
         self.converter = converter
         self.nms = nms_cfg
 
-    def __call__(self, predict, rev_tensor: Optional[Tensor] = None) -> List[Tensor]:
+    def __call__(
+        self, predict, rev_tensor: Optional[Tensor] = None, image_size: Optional[List[int]] = None
+    ) -> List[Tensor]:
+        if image_size is not None:
+            self.converter.update(image_size)
         prediction = self.converter(predict["Main"])
         pred_class, _, pred_bbox = prediction[:3]
         pred_conf = prediction[3] if len(prediction) == 4 else None
@@ -168,6 +210,7 @@ def predicts_to_json(img_paths, predicts, rev_tensor):
     batch_json = []
     for img_path, bboxes, box_reverse in zip(img_paths, predicts, rev_tensor):
         scale, shift = box_reverse.split([1, 4])
+        bboxes = bboxes.clone()
         bboxes[:, 1:5] = (bboxes[:, 1:5] - shift[None]) / scale[None]
         bboxes[:, 1:5] = transform_bbox(bboxes[:, 1:5], "xyxy -> xywh")
         for cls, *pos, conf in bboxes:
